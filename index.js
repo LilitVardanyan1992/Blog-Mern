@@ -1,11 +1,14 @@
 import express from "express";
-import jwt from "jsonwebtoken";
-import bcrypt from "bcrypt";
+import multer from "multer";
 import mongoose from "mongoose";
-import { registerValidation } from "./validations/auth.js";
-import { validationResult } from "express-validator";
-import UserModal from "./models/User.js";
+import {
+    registerValidation,
+    loginValidation,
+    postCreateValidation,
+} from "./validations/auth.js";
 import checkAuth from "./utils/checkauth.js";
+import * as UserContorller from "./controllers/userController.js";
+import * as PostController from "./controllers/postController.js";
 
 mongoose
     .connect(
@@ -17,116 +20,23 @@ mongoose
 
 const app = express();
 
+const storage = multer.diskStorage({
+    destination: (_, __, cb) => {
+        cb(null, "uploads");
+    },
+});
+
 app.use(express.json());
 
-app.post("/auth/login", async (req, res) => {
-    try {
-        const user = await UserModal.findOne({ email: req.body.email });
+app.post("/auth/login", loginValidation, UserContorller.login);
+app.post("/auth/register", registerValidation, UserContorller.register);
+app.get("/auth/me", checkAuth, UserContorller.getme);
 
-        if (!user) {
-            return res.status(404).json({ message: "User didn't find." });
-        }
-
-        const isValidPass = await bcrypt.compare(
-            req.body.password,
-            user._doc.passwordHash
-        );
-
-        if (!isValidPass) {
-            return res.status(400).json({
-                message: "Invalid login and password.",
-            });
-        }
-
-        const token = jwt.sign(
-            {
-                _id: user._id,
-            },
-            "secret123",
-            {
-                expiresIn: "30d",
-            }
-        );
-
-        const { passwordHash, ...userData } = user._doc;
-
-        res.json({
-            ...userData,
-            token,
-        });
-    } catch (error) {
-        res.status(500).json({
-            message: "Can not authorize.",
-        });
-    }
-});
-
-app.post("/auth/register", registerValidation, async (req, res) => {
-    try {
-        const errors = validationResult(req);
-
-        if (!errors.isEmpty()) {
-            return res.status(400).json(errors.array());
-        }
-
-        const password = req.body.password;
-        const salt = await bcrypt.genSalt(10);
-        const hash = await bcrypt.hash(password, salt);
-
-        const doc = new UserModal({
-            email: req.body.email,
-            fullName: req.body.fullName,
-            avatarUrl: req.body.avatarUrl,
-            passwordHash: hash,
-        });
-
-        const user = await doc.save();
-
-        const token = jwt.sign(
-            {
-                _id: user._id,
-            },
-            "secret123",
-            {
-                expiresIn: "30d",
-            }
-        );
-
-        const { passwordHash, ...userData } = user._doc;
-
-        res.json({
-            ...userData,
-            token,
-        });
-    } catch (err) {
-        console.log(err);
-        res.status(500).json({
-            message: "Can not register.",
-        });
-    }
-});
-
-app.get("/auth/me", checkAuth, async (req, res) => {
-    try {
-        const user = await UserModal.findById(req.userId);
-
-        if (!user) {
-            return res.status(404).json({
-                message: "User didn't find,",
-            });
-        }
-
-        const { passwordHash, ...userData } = user._doc;
-
-        res.json({
-            userData,
-        });
-    } catch (error) {
-        return res.status(404).json({
-            message: "net dostupa",
-        });
-    }
-});
+app.get("/posts", PostController.getAll);
+app.get("/posts/:id", PostController.getOne);
+app.post("/posts", checkAuth, postCreateValidation, PostController.create);
+app.delete("/posts/:id", PostController.remove);
+app.patch("/posts/:id", PostController.update);
 
 app.listen(4445, (err) => {
     if (err) {
